@@ -29,6 +29,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
+            curl \
+            ca-certificates \
             pkg-config \
             libgtk-4-dev \
             libgtk4-layer-shell-dev \
