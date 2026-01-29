@@ -28,7 +28,9 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y \
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            git \
             curl \
             ca-certificates \
             pkg-config \
@@ -38,11 +40,17 @@ jobs:
             libcairo2-dev \
             libpango1.0-dev \
             libgdk-pixbuf-2.0-dev
+          rm -rf /var/lib/apt/lists/*
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
