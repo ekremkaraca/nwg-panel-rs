@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-linux:
     name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +29,7 @@ jobs:
           sudo apt-get install -y \
             pkg-config \
             libgtk-4-dev \
+            libgtk4-layer-shell-dev \
             libglib2.0-dev \
             libcairo2-dev \
             libpango1.0-dev \
