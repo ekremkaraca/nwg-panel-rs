@@ -1,0 +1,33 @@
+[package]
+name = "nwg-panel-rs"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+dirs = "5"
+gdk-pixbuf = { version = "0.20", package = "gdk-pixbuf" }
+gdk4 = { version = "0.10", package = "gdk4" }
+gio = "0.21"
+glib = "0.21"
+gtk4 = { version = "0.10", package = "gtk4" }
+gtk4-layer-shell = "0.7"
+hyprlang = { version = "0.4", features = ["hyprland"] }
+hyprland = "0.4.0-beta.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zbus = { version = "5", features = ["blocking"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }"
+pkg-fmt = "tgz"
