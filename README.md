@@ -6,13 +6,18 @@ Rewrite of nwg-panel in Rust with GTK4. This project is still in development and
 
 ### Prebuilt (recommended)
 
-This project publishes GitHub Release artifacts that can be installed with `cargo-binstall`.
+Arch Linux users can install the prebuilt binary from the AUR as `nwg-panel-rs-bin`.
 
-Note: the prebuilt binary is dynamically linked and requires GTK4 + layer-shell libraries to be installed on the target system.
+Example:
 
 ```bash
-cargo binstall nwg-panel-rs
+paru -S nwg-panel-rs-bin
 ```
+
+Suggested Arch package dependencies for the AUR `PKGBUILD`:
+
+- **depends**: `gtk4`, `gtk4-layer-shell`, `dbus`, `hyprland`
+- **makedepends**: `tar` (if repackaging release tarballs)
 
 ### From source
 
@@ -67,6 +72,7 @@ Crates:
 MIT License
 
 Copyright (c) 2021 - Piotr Miller & Contributors
+
 Copyright (c) 2026 - nwg-panel-rs & Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
