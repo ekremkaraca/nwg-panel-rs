@@ -2,6 +2,20 @@
 
 Rewrite of nwg-panel in Rust with GTK4. This project is still in development and not ready for production use. Your feedback and contributions are welcome!
 
+## Features (current)
+
+- **Config + CSS hot reload** (watch `~/.config/nwg-panel/config` and `~/.config/nwg-panel/style.css`)
+  - Debounced rebuilds
+  - **Last-known-good UI** stays visible if the new config fails to parse
+- **Visible config error indicator** on the panel
+  - Tooltip headline: `Config error`
+  - Full parser error on the next line
+- **Controls dropdown** (caret / popover)
+  - Brightness slider
+  - Volume slider
+  - Battery info
+  - Ordering matches `controls-settings.components`
+
 ## Install
 
 ### Prebuilt (recommended)
@@ -18,6 +32,12 @@ Suggested Arch package dependencies for the AUR `PKGBUILD`:
 
 - **depends**: `gtk4`, `gtk4-layer-shell`, `dbus`, `hyprland`
 - **makedepends**: `tar` (if repackaging release tarballs)
+
+Optional runtime dependencies (feature detection at runtime):
+
+- `brightnessctl` or `light` (brightness slider)
+- `pamixer` or `pactl` (volume slider)
+- `upower` (battery info)
 
 ### From source
 

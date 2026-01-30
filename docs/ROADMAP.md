@@ -21,7 +21,8 @@
  - **Core**: GTK4 + `gtk4-layer-shell`, one window per panel entry, CSS loading.
  - **Config**: parses a subset of upstream keys (layer/position/margins/exclusive-zone/modules lists; partial module configs).
  - **Hyprland**: `hyprland-workspaces`, `hyprland-taskbar` (basic).
- - **Modules**: `clock`, `controls` (icons-only), `tray` (SNI watcher/host, icons-only, best-effort), `button-omarchy`.
+ - **Modules**: `clock`, `controls` (icons + popover sliders/info), `tray` (SNI watcher/host, icons-only, best-effort), `button-omarchy`.
+ - **Reload**: config + CSS watch with debounced rebuilds; safe reload keeps last-known-good UI on config parse errors.
  
  ## Milestones
  
@@ -44,7 +45,11 @@
    - More reliable active window tracking and updates.
  - **Controls stability**
    - Make refresh logic more deterministic and configurable (intervals; avoid command spam).
- 
+   - The caret-triggered popover is implemented; remaining work is parity/polish.
+ - **Reload stability**
+   - Keep debounced hot reload robust across multiple windows.
+   - Keep last-known-good UI visible on config errors (implemented); add more diagnostics as needed.
+
  Exit criteria:
  
  - Runs for hours without crashing.
@@ -69,11 +74,17 @@
  
  Goal: match upstream “controls” UX.
  
- - **Popup window** for controls (brightness/volume/battery details).
+ - **Popover / popup behavior parity**
+   - Close behavior, focus behavior, and consistent styling.
  - Optional interaction:
    - Scroll to change volume/brightness (configurable).
-   - Click actions and close behavior.
+   - Click actions.
  - Battery details (time remaining/charging state) best-effort.
+ 
+ Notes:
+ 
+ - A caret-triggered popover with brightness/volume sliders and battery info is already implemented.
+ - Remaining work here is parity/polish (matching upstream styling/behavior).
  
  ### M3: “Nice-to-have” modules (opt-in)
  
@@ -83,6 +94,13 @@
  - `brightness-slider` (separate from controls).
  - `openweather` (behind feature flag; avoid hard dependencies when possible).
  - `pinned` (launcher shortcuts).
+ 
+ ### P0: UI polish / GTK warnings (low priority)
+ 
+ Goal: eliminate remaining GTK runtime warnings that may be theme/CSS dependent.
+ 
+ - Investigate `GtkGizmo slider` min-height warnings (likely theme/CSS interactions).
+ - Investigate occasional `GtkToggleButton` active-state accounting warnings.
  
  ### M4: Other compositors
  

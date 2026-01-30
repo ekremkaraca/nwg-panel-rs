@@ -1,7 +1,7 @@
 # Maintainer: Ekrem Karaca <ekrem.karaca@yandex.com>
 
 pkgname=nwg-panel-rs-bin
-pkgver=0.0.2
+pkgver=0.0.3
 pkgrel=1
 pkgdesc="Rewrite of nwg-panel in Rust with GTK4 (prebuilt binary)"
 arch=('x86_64')
@@ -13,6 +13,14 @@ depends=(
   'gtk4-layer-shell'
   'dbus'
   'hyprland'
+)
+
+optdepends=(
+  'brightnessctl: brightness slider backend (recommended)'
+  'light: brightness slider backend (alternative)'
+  'pamixer: volume slider backend (recommended)'
+  'pulseaudio-utils: provides pactl volume fallback'
+  'upower: battery info backend'
 )
 
 provides=('nwg-panel-rs')

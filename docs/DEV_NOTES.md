@@ -87,7 +87,7 @@ Controls:
 - Upstream config uses `controls: "left|right|off"` and `controls-settings: { ... }`.
 - If `controls` is `left`/`right`, we create the controls widget and place it in that box.
 - If `controls` appears in `modules-*`, we still enable it, but avoid duplicating it.
-- The current controls implementation is minimal (icons-only); popup UI parity is planned later.
+- The current controls implementation includes a caret-triggered popover with controls details.
 
 ## Implemented: layer-shell window setup
 
@@ -124,6 +124,41 @@ Notes:
 - If your GTK theme imports `libadwaita.css`/`libadwaita-tweaks.css` from `~/.config/gtk-4.0/`, you can satisfy it without sudo by creating empty placeholder files:
   - `~/.config/gtk-4.0/libadwaita.css`
   - `~/.config/gtk-4.0/libadwaita-tweaks.css`
+
+## Implemented: config + CSS hot reload (debounced) + safe fallback
+
+We watch the config and style files and trigger a debounced rebuild:
+
+- Config: `~/.config/nwg-panel/config` (or `-c`)
+- CSS: `~/.config/nwg-panel/style.css` (or `-s`)
+
+Behavior:
+
+- Rebuilds are debounced to avoid rapid rebuild loops while editors are saving.
+- If a new config fails to parse, the app keeps the **last-known-good UI** and shows a visible warning.
+
+## Implemented: visible config error indicator
+
+When a config reload fails, we show a small warning indicator on the panel:
+
+- Tooltip headline: `Config error`
+- Full parser error on the next line
+
+The indicator clears automatically once a valid config is loaded.
+
+## Implemented: controls dropdown (popover)
+
+The controls module contains a caret button that opens a small popover. The popover content respects `controls-settings.components` ordering and can include:
+
+- Brightness slider
+- Volume slider
+- Battery info
+
+Runtime command backends (best-effort fallbacks):
+
+- Brightness: `light` (preferred) or `brightnessctl`
+- Volume: `pamixer` (preferred) or `pactl`
+- Battery: `upower`
 
 ## Implemented: clock module
 
