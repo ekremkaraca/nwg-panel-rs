@@ -143,12 +143,41 @@ fn try_build_ui(app: &gtk::Application) -> anyhow::Result<()> {
     let style_path = config_dir.join(&args.style);
     let config_path = config_dir.join(&args.config);
 
-    let (sender, receiver) = cb::unbounded::<AppMsg>();
+    let (app_sender, app_receiver) = cb::unbounded::<AppMsg>();
     let (controls_sender, controls_receiver) = cb::unbounded::<ControlsMsg>();
-    spawn_hyprland_poller(sender.clone());
-    spawn_sni_watcher(sender.clone());
+    spawn_hyprland_poller(app_sender.clone());
+    spawn_sni_watcher(app_sender.clone());
 
-    let hypr_snapshot_sender = sender.clone();
+    let hypr_snapshot_sender = app_sender.clone();
+
+    let next_sub_id: Rc<Cell<usize>> = Rc::new(Cell::new(1));
+    let app_subs: Rc<RefCell<Vec<(usize, cb::Sender<AppMsg>)>>> = Rc::new(RefCell::new(Vec::new()));
+    let controls_subs: Rc<RefCell<Vec<(usize, cb::Sender<ControlsMsg>)>>> = Rc::new(RefCell::new(Vec::new()));
+    let error_indicators: Rc<RefCell<Vec<(usize, gtk::Widget)>>> = Rc::new(RefCell::new(Vec::new()));
+
+    {
+        let app_subs = app_subs.clone();
+        glib::timeout_add_local(Duration::from_millis(50), move || {
+            while let Ok(msg) = app_receiver.try_recv() {
+                if let Ok(mut subs) = app_subs.try_borrow_mut() {
+                    subs.retain(|(_, tx)| tx.send(msg.clone()).is_ok());
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    {
+        let controls_subs = controls_subs.clone();
+        glib::timeout_add_local(Duration::from_millis(200), move || {
+            while let Ok(msg) = controls_receiver.try_recv() {
+                if let Ok(mut subs) = controls_subs.try_borrow_mut() {
+                    subs.retain(|(_, tx)| tx.send(msg.clone()).is_ok());
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
 
     let windows: Rc<RefCell<Vec<gtk::ApplicationWindow>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -157,20 +186,37 @@ fn try_build_ui(app: &gtk::Application) -> anyhow::Result<()> {
         let display = display.clone();
         let style_path = style_path.clone();
         let config_path = config_path.clone();
-        let receiver = receiver.clone();
-        let controls_receiver = controls_receiver.clone();
         let controls_sender = controls_sender.clone();
         let windows = windows.clone();
         let hypr_snapshot_sender = hypr_snapshot_sender.clone();
+        let next_sub_id = next_sub_id.clone();
+        let app_subs = app_subs.clone();
+        let controls_subs = controls_subs.clone();
+        let error_indicators = error_indicators.clone();
 
         move || {
-            // Close existing windows first.
-            if let Ok(mut ws) = windows.try_borrow_mut() {
-                for w in ws.iter() {
-                    w.close();
+            let set_error = |msg: String| {
+                let tooltip = if msg.trim().is_empty() {
+                    "Config error".to_string()
+                } else {
+                    format!("Config error\n{}", msg)
+                };
+                if let Ok(indicators) = error_indicators.try_borrow() {
+                    for (_, w) in indicators.iter() {
+                        w.set_tooltip_text(Some(&tooltip));
+                        w.set_visible(true);
+                    }
                 }
-                ws.clear();
-            }
+            };
+
+            let clear_error = || {
+                if let Ok(indicators) = error_indicators.try_borrow() {
+                    for (_, w) in indicators.iter() {
+                        w.set_visible(false);
+                        w.set_tooltip_text(None);
+                    }
+                }
+            };
 
             if let Err(err) = load_user_css_if_exists(&display, &style_path)
                 .with_context(|| format!("Failed to load CSS {}", style_path.display()))
@@ -183,24 +229,67 @@ fn try_build_ui(app: &gtk::Application) -> anyhow::Result<()> {
             {
                 Ok(p) => p,
                 Err(err) => {
+                    // Safe reload: keep last known-good UI alive.
                     eprintln!("nwg-panel-rs: reload: {err:#}");
-                    Vec::new()
+                    set_error(format!("Config error: {err}"));
+                    return;
                 }
             };
 
             let panels = expand_panels_for_all_outputs(&display, panels);
 
             if panels.is_empty() {
-                eprintln!("nwg-panel-rs: no panels found in config");
+                // Safe reload: don't tear down the existing UI if config is empty.
+                eprintln!("nwg-panel-rs: reload: no panels found in config; keeping existing UI");
+                set_error("Config error: no panels found".to_string());
+                return;
+            }
+
+            // Successful config load: now perform the teardown + rebuild.
+            clear_error();
+            if let Ok(mut subs) = app_subs.try_borrow_mut() {
+                subs.clear();
+            }
+            if let Ok(mut subs) = controls_subs.try_borrow_mut() {
+                subs.clear();
+            }
+            if let Ok(mut indicators) = error_indicators.try_borrow_mut() {
+                indicators.clear();
+            }
+            next_sub_id.set(1);
+
+            // Close existing windows.
+            if let Ok(mut ws) = windows.try_borrow_mut() {
+                for w in ws.iter() {
+                    w.close();
+                }
+                ws.clear();
             }
 
             for panel in panels {
+                let sub_id = next_sub_id.get();
+                next_sub_id.set(sub_id + 1);
+
+                let (win_app_tx, win_app_rx) = cb::unbounded::<AppMsg>();
+                let (win_controls_tx, win_controls_rx) = cb::unbounded::<ControlsMsg>();
+
+                if let Ok(mut subs) = app_subs.try_borrow_mut() {
+                    subs.push((sub_id, win_app_tx));
+                }
+                if let Ok(mut subs) = controls_subs.try_borrow_mut() {
+                    subs.push((sub_id, win_controls_tx));
+                }
+
                 let window = build_panel_window(
                     &app,
                     &display,
                     &panel,
-                    receiver.clone(),
-                    controls_receiver.clone(),
+                    sub_id,
+                    app_subs.clone(),
+                    controls_subs.clone(),
+                    error_indicators.clone(),
+                    win_app_rx,
+                    win_controls_rx,
                     controls_sender.clone(),
                 );
                 window.present();
@@ -289,6 +378,10 @@ fn build_panel_window(
     app: &gtk::Application,
     display: &gdk::Display,
     panel: &PanelConfig,
+    subscriber_id: usize,
+    app_subs: Rc<RefCell<Vec<(usize, cb::Sender<AppMsg>)>>>,
+    controls_subs: Rc<RefCell<Vec<(usize, cb::Sender<ControlsMsg>)>>>,
+    error_indicators: Rc<RefCell<Vec<(usize, gtk::Widget)>>>,
     receiver: cb::Receiver<AppMsg>,
     controls_receiver: cb::Receiver<ControlsMsg>,
     controls_sender: cb::Sender<ControlsMsg>,
@@ -397,6 +490,16 @@ fn build_panel_window(
     right.set_halign(gtk::Align::End);
     right.set_hexpand(true);
     right.set_widget_name("modules-right");
+
+    let config_error_icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
+    config_error_icon.set_widget_name("config-error");
+    config_error_icon.set_pixel_size(16);
+    config_error_icon.set_visible(false);
+    right.append(&config_error_icon);
+
+    if let Ok(mut indicators) = error_indicators.try_borrow_mut() {
+        indicators.push((subscriber_id, config_error_icon.upcast::<gtk::Widget>()));
+    }
 
     let active_title_label = gtk::Label::new(None);
     active_title_label.set_widget_name("active-window-title");
@@ -531,9 +634,22 @@ fn build_panel_window(
 
     window.connect_close_request({
         let update_source_id = update_source_id.clone();
+        let app_subs = app_subs.clone();
+        let controls_subs = controls_subs.clone();
+        let error_indicators = error_indicators.clone();
         move |_| {
             if let Some(id) = update_source_id.borrow_mut().take() {
                 id.remove();
+            }
+
+            if let Ok(mut subs) = app_subs.try_borrow_mut() {
+                subs.retain(|(id, _)| *id != subscriber_id);
+            }
+            if let Ok(mut subs) = controls_subs.try_borrow_mut() {
+                subs.retain(|(id, _)| *id != subscriber_id);
+            }
+            if let Ok(mut indicators) = error_indicators.try_borrow_mut() {
+                indicators.retain(|(id, _)| *id != subscriber_id);
             }
             glib::Propagation::Proceed
         }
