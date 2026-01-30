@@ -4,6 +4,7 @@ use super::hyprland::{hyprctl_dispatch_workspace, hyprctl_dispatch_focus_address
 use super::hypr_config::HyprConfig;
 use super::controls::ControlsUi;
 use super::tray::activate_sni_item;
+use gdk4 as gdk;
 use gtk4 as gtk;
 use gtk::prelude::*;
 use std::cell::RefCell;
@@ -435,20 +436,66 @@ impl TrayUi {
         if let Some(btn) = buttons.get(&item.as_registration_string()) {
             match icon {
                 TrayIconPayload::IconName(name) => {
-                    if gtk::IconTheme::default().has_icon(name) {
-                        let img = gtk::Image::from_icon_name(name);
-                        img.set_pixel_size(16);
-                        img.set_icon_size(gtk::IconSize::Normal);
-                        btn.set_child(Some(&img));
-                    }
+                    let img = gtk::Image::from_icon_name(name);
+                    img.set_pixel_size(16);
+                    img.set_icon_size(gtk::IconSize::Normal);
+                    btn.set_child(Some(&img));
                 }
-                TrayIconPayload::Pixmap(_pixmaps) => {
-                    // For now, just use a fallback icon for pixmap data
-                    // TODO: Implement proper ARGB32 to texture conversion
-                    if gtk::IconTheme::default().has_icon("image-x-generic") {
-                        let img = gtk::Image::from_icon_name("image-x-generic");
+                TrayIconPayload::Pixmap(pixmaps) => {
+                    let mut chosen: Option<(i32, i32, Vec<u8>)> = None;
+                    for (w, h, bytes) in pixmaps.iter() {
+                        if *w <= 0 || *h <= 0 {
+                            continue;
+                        }
+                        if bytes.len() != (*w as usize) * (*h as usize) * 4 {
+                            continue;
+                        }
+                        let candidate = (*w, *h, bytes.clone());
+                        chosen = match chosen {
+                            None => Some(candidate),
+                            Some((cw, ch, _)) => {
+                                if (*w * *h) > (cw * ch) {
+                                    Some(candidate)
+                                } else {
+                                    Some((cw, ch, chosen.unwrap().2))
+                                }
+                            }
+                        };
+                    }
+
+                    if let Some((w, h, bytes)) = chosen {
+                        // SNI IconPixmap is ARGB32 (non-premultiplied). GDK MemoryTexture expects
+                        // B8g8r8a8Premultiplied. Convert per pixel.
+                        let mut out = bytes;
+                        for px in out.chunks_exact_mut(4) {
+                            let a = px[0] as u16;
+                            let r = px[1] as u16;
+                            let g = px[2] as u16;
+                            let b = px[3] as u16;
+
+                            // Premultiply channels by alpha.
+                            let r = (r * a + 127) / 255;
+                            let g = (g * a + 127) / 255;
+                            let b = (b * a + 127) / 255;
+
+                            // Repack into BGRA.
+                            px[0] = b as u8;
+                            px[1] = g as u8;
+                            px[2] = r as u8;
+                            px[3] = a as u8;
+                        }
+
+                        let stride: usize = (w as usize) * 4;
+                        let bytes = glib::Bytes::from_owned(out);
+                        let tex = gdk::MemoryTexture::new(
+                            w,
+                            h,
+                            gdk::MemoryFormat::B8g8r8a8Premultiplied,
+                            &bytes,
+                            stride,
+                        );
+                        let img = gtk::Image::from_paintable(Some(&tex));
                         img.set_pixel_size(16);
-                        img.set_icon_size(gtk::IconSize::Normal);
                         btn.set_child(Some(&img));
                     }
                 }
@@ -479,7 +526,7 @@ impl TrayUi {
             let btn = gtk::Button::new();
             btn.set_widget_name("tray-item");
 
-            let img = gtk::Image::from_icon_name("image-x-generic");
+            let img = gtk::Image::from_icon_name("image-missing");
             img.set_pixel_size(16);
             img.set_icon_size(gtk::IconSize::Normal);
             btn.set_child(Some(&img));

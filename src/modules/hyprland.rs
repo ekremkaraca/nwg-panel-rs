@@ -160,35 +160,35 @@ pub fn spawn_hyprland_poller(sender: cb::Sender<AppMsg>) {
         });
         
         // Initial data fetch
-        if let Ok(Some(active_window)) = Client::get_active() {
-            let _ = sender.send(AppMsg::HyprActiveWindow(active_window.title));
-            let _ = sender.send(AppMsg::HyprActiveWindowAddress(active_window.address.to_string()));
-        }
-        
-        if let Ok(workspaces) = Workspaces::get() {
-            let workspaces_vec: Vec<HyprWorkspace> = workspaces
-                .into_iter()
-                .map(|w| w.into())
-                .collect();
-            if let Ok(active_workspace) = Workspace::get_active() {
-                let _ = sender.send(AppMsg::HyprWorkspaces {
-                    workspaces: workspaces_vec,
-                    active_id: active_workspace.id,
-                });
-            }
-        }
-        
-        if let Ok(clients) = Clients::get() {
-            let clients_vec: Vec<HyprClient> = clients
-                .into_iter()
-                .map(|c| c.into())
-                .collect();
-            let _ = sender.send(AppMsg::HyprClients { clients: clients_vec });
-        }
+        send_hyprland_snapshot(&sender);
         
         // Start event listener (blocking)
         let _ = event_listener.start_listener();
     });
+}
+
+pub fn send_hyprland_snapshot(sender: &cb::Sender<AppMsg>) {
+    if let Ok(Some(active_window)) = Client::get_active() {
+        let _ = sender.send(AppMsg::HyprActiveWindow(active_window.title));
+        let _ = sender.send(AppMsg::HyprActiveWindowAddress(
+            active_window.address.to_string(),
+        ));
+    }
+
+    if let Ok(workspaces) = Workspaces::get() {
+        let workspaces_vec: Vec<HyprWorkspace> = workspaces.into_iter().map(|w| w.into()).collect();
+        if let Ok(active_workspace) = Workspace::get_active() {
+            let _ = sender.send(AppMsg::HyprWorkspaces {
+                workspaces: workspaces_vec,
+                active_id: active_workspace.id,
+            });
+        }
+    }
+
+    if let Ok(clients) = Clients::get() {
+        let clients_vec: Vec<HyprClient> = clients.into_iter().map(|c| c.into()).collect();
+        let _ = sender.send(AppMsg::HyprClients { clients: clients_vec });
+    }
 }
 
 
@@ -222,7 +222,7 @@ pub struct TrayItem {
 pub enum TrayIconPayload {
     None,
     IconName(String),
-    Pixmap(Vec<(i32, Vec<u8>)>),
+    Pixmap(Vec<(i32, i32, Vec<u8>)>),
 }
 
 impl TrayItem {

@@ -17,9 +17,12 @@ gtk4 = { version = "0.10", package = "gtk4" }
 gtk4-layer-shell = "0.7"
 hyprlang = { version = "0.4", features = ["hyprland"] }
 hyprland = "0.4.0-beta.3"
+ notify = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-zbus = { version = "5", features = ["blocking"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+zbus = { version = "5", features = ["tokio", "blocking"] }
 
 [profile.release]
 lto = "thin"

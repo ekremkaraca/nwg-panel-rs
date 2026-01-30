@@ -3,16 +3,21 @@ mod modules;
 use anyhow::Context;
 use clap::Parser;
 use gdk4 as gdk;
+use gdk::prelude::*;
 use gtk4 as gtk;
 use gtk::prelude::*;
 use gtk4_layer_shell::LayerShell;
+use notify::{RecursiveMode, Watcher};
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Instant;
 use std::time::Duration;
 use crossbeam_channel as cb;
 use glib;
 
 use modules::config::{load_panels_from_path, ControlsCompat, PanelConfig};
-use modules::hyprland::{spawn_hyprland_poller, AppMsg};
+use modules::hyprland::{send_hyprland_snapshot, spawn_hyprland_poller, AppMsg};
 use modules::ui::{WorkspacesUi, TaskbarUi, TrayUi, instantiate_module};
 use modules::tray::spawn_sni_watcher;
 use modules::theme::load_user_css_if_exists;
@@ -26,6 +31,90 @@ struct Args {
 
     #[arg(short, long, default_value = "style.css")]
     style: String,
+}
+
+fn select_gdk_monitor(display: &gdk::Display, panel: &PanelConfig) -> Option<gdk::Monitor> {
+    let want_monitor = panel.monitor.trim();
+    let want_output = panel.output.trim();
+
+    if want_monitor.is_empty() && want_output.is_empty() {
+        return None;
+    }
+
+    let monitors = display.monitors();
+    let n = monitors.n_items();
+
+    for idx in 0..n {
+        let obj = monitors.item(idx)?;
+        let mon = obj.downcast::<gdk::Monitor>().ok()?;
+
+        let connector = mon.connector().unwrap_or_default();
+        let manufacturer = mon.manufacturer().unwrap_or_default();
+        let model = mon.model().unwrap_or_default();
+
+        let haystack = format!(
+            "{}\n{}\n{}",
+            connector, manufacturer, model
+        );
+
+        if !want_monitor.is_empty() {
+            // Upstream `monitor` is typically a human-readable monitor description.
+            if haystack.contains(want_monitor) {
+                return Some(mon);
+            }
+        }
+
+        if !want_output.is_empty() {
+            // Upstream `output` is typically a connector-like identifier (e.g. HDMI-A-1, DP-1).
+            if connector.as_str() == want_output || haystack.contains(want_output) {
+                return Some(mon);
+            }
+        }
+    }
+
+    None
+}
+
+fn expand_panels_for_all_outputs(display: &gdk::Display, panels: Vec<PanelConfig>) -> Vec<PanelConfig> {
+    let mut out = Vec::new();
+
+    let monitors = display.monitors();
+    let n = monitors.n_items();
+
+    for panel in panels {
+        if panel.output.trim() == "All" && panel.monitor.trim().is_empty() {
+            for idx in 0..n {
+                let obj = match monitors.item(idx) {
+                    Some(o) => o,
+                    None => continue,
+                };
+
+                let mon = match obj.downcast::<gdk::Monitor>() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+
+                let connector = mon.connector().unwrap_or_default();
+                let connector = connector.to_string();
+                if connector.trim().is_empty() {
+                    continue;
+                }
+
+                let mut clone = panel.clone();
+                clone.output = connector.clone();
+                if !clone.name.trim().is_empty() {
+                    clone.name = format!("{}-{}", clone.name.trim(), connector);
+                } else {
+                    clone.name = connector;
+                }
+                out.push(clone);
+            }
+        } else {
+            out.push(panel);
+        }
+    }
+
+    out
 }
 
 fn main() -> anyhow::Result<()> {
@@ -52,38 +141,153 @@ fn try_build_ui(app: &gtk::Application) -> anyhow::Result<()> {
     let display = gdk::Display::default().context("Could not connect to a display")?;
 
     let style_path = config_dir.join(&args.style);
-    load_user_css_if_exists(&display, &style_path)
-        .with_context(|| format!("Failed to load CSS {}", style_path.display()))?;
-
     let config_path = config_dir.join(&args.config);
-    let panels = load_panels_from_path(&config_path)
-        .with_context(|| format!("Failed loading config {}", config_path.display()))?;
-
-    if panels.is_empty() {
-        eprintln!("nwg-panel-rs: no panels found in config");
-    }
 
     let (sender, receiver) = cb::unbounded::<AppMsg>();
     let (controls_sender, controls_receiver) = cb::unbounded::<ControlsMsg>();
     spawn_hyprland_poller(sender.clone());
-    spawn_sni_watcher(sender);
+    spawn_sni_watcher(sender.clone());
 
-    for panel in panels {
-        let window = build_panel_window(
-            app,
-            &panel,
-            receiver.clone(),
-            controls_receiver.clone(),
-            controls_sender.clone(),
-        );
-        window.present();
+    let hypr_snapshot_sender = sender.clone();
+
+    let windows: Rc<RefCell<Vec<gtk::ApplicationWindow>>> = Rc::new(RefCell::new(Vec::new()));
+
+    let rebuild = {
+        let app = app.clone();
+        let display = display.clone();
+        let style_path = style_path.clone();
+        let config_path = config_path.clone();
+        let receiver = receiver.clone();
+        let controls_receiver = controls_receiver.clone();
+        let controls_sender = controls_sender.clone();
+        let windows = windows.clone();
+        let hypr_snapshot_sender = hypr_snapshot_sender.clone();
+
+        move || {
+            // Close existing windows first.
+            if let Ok(mut ws) = windows.try_borrow_mut() {
+                for w in ws.iter() {
+                    w.close();
+                }
+                ws.clear();
+            }
+
+            if let Err(err) = load_user_css_if_exists(&display, &style_path)
+                .with_context(|| format!("Failed to load CSS {}", style_path.display()))
+            {
+                eprintln!("nwg-panel-rs: reload: {err:#}");
+            }
+
+            let panels = match load_panels_from_path(&config_path)
+                .with_context(|| format!("Failed loading config {}", config_path.display()))
+            {
+                Ok(p) => p,
+                Err(err) => {
+                    eprintln!("nwg-panel-rs: reload: {err:#}");
+                    Vec::new()
+                }
+            };
+
+            let panels = expand_panels_for_all_outputs(&display, panels);
+
+            if panels.is_empty() {
+                eprintln!("nwg-panel-rs: no panels found in config");
+            }
+
+            for panel in panels {
+                let window = build_panel_window(
+                    &app,
+                    &display,
+                    &panel,
+                    receiver.clone(),
+                    controls_receiver.clone(),
+                    controls_sender.clone(),
+                );
+                window.present();
+                if let Ok(mut ws) = windows.try_borrow_mut() {
+                    ws.push(window);
+                }
+            }
+
+            send_hyprland_snapshot(&hypr_snapshot_sender);
+        }
+    };
+
+    // Initial build.
+    rebuild();
+
+    // Watch config + CSS and rebuild on change (debounced).
+    let (reload_tx, reload_rx) = cb::unbounded::<()>();
+    let last_reload_event: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+
+    {
+        let last_reload_event = last_reload_event.clone();
+        let rebuild = Rc::new(rebuild);
+        glib::timeout_add_local(Duration::from_millis(100), move || {
+            let mut got_event = false;
+            while reload_rx.try_recv().is_ok() {
+                got_event = true;
+            }
+
+            if got_event {
+                last_reload_event.set(Some(Instant::now()));
+            }
+
+            if let Some(t0) = last_reload_event.get() {
+                if t0.elapsed() >= Duration::from_millis(250) {
+                    rebuild();
+                    last_reload_event.set(None);
+                }
+            }
+
+            glib::ControlFlow::Continue
+        });
     }
+
+    let mut watcher = notify::recommended_watcher({
+        let reload_tx = reload_tx.clone();
+        let config_path = config_path.clone();
+        let style_path = style_path.clone();
+        move |res: notify::Result<notify::Event>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("nwg-panel-rs: watcher error: {err}");
+                    return;
+                }
+            };
+
+            // Most editors write via rename/temp files; we accept any event that touches the
+            // target files (or their parent directory reports them).
+            let mut matched = false;
+            for p in &event.paths {
+                if *p == config_path || *p == style_path {
+                    matched = true;
+                    break;
+                }
+            }
+            if matched {
+                let _ = reload_tx.send(());
+            }
+        }
+    })?;
+
+    if let Err(err) = watcher.watch(&config_path, RecursiveMode::NonRecursive) {
+        eprintln!("nwg-panel-rs: failed to watch config {}: {err}", config_path.display());
+    }
+    if let Err(err) = watcher.watch(&style_path, RecursiveMode::NonRecursive) {
+        eprintln!("nwg-panel-rs: failed to watch style {}: {err}", style_path.display());
+    }
+
+    // Keep watcher alive for the entire process lifetime.
+    std::mem::forget(watcher);
 
     Ok(())
 }
 
 fn build_panel_window(
     app: &gtk::Application,
+    display: &gdk::Display,
     panel: &PanelConfig,
     receiver: cb::Receiver<AppMsg>,
     controls_receiver: cb::Receiver<ControlsMsg>,
@@ -104,6 +308,17 @@ fn build_panel_window(
 
     window.init_layer_shell();
     window.set_namespace(Some("nwg-panel"));
+
+    if let Some(mon) = select_gdk_monitor(display, panel) {
+        window.set_monitor(Some(&mon));
+    } else if !panel.monitor.trim().is_empty() || !panel.output.trim().is_empty() {
+        eprintln!(
+            "nwg-panel-rs: could not match monitor for panel '{}' (monitor='{}', output='{}')",
+            panel.name,
+            panel.monitor,
+            panel.output
+        );
+    }
 
     // Set layer
     match panel.layer.as_str() {
@@ -257,7 +472,8 @@ fn build_panel_window(
 
     let controls_ui_for_update = controls_ui.clone();
 
-    glib::timeout_add_local(Duration::from_millis(200), move || {
+    let update_source_id = {
+        let id = glib::timeout_add_local(Duration::from_millis(200), move || {
         // Process messages safely
         while let Ok(msg) = receiver.try_recv() {
             match msg {
@@ -309,6 +525,18 @@ fn build_panel_window(
         }
         
         glib::ControlFlow::Continue
+        });
+        Rc::new(RefCell::new(Some(id)))
+    };
+
+    window.connect_close_request({
+        let update_source_id = update_source_id.clone();
+        move |_| {
+            if let Some(id) = update_source_id.borrow_mut().take() {
+                id.remove();
+            }
+            glib::Propagation::Proceed
+        }
     });
 
     for m in &panel.modules_left {

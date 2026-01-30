@@ -78,7 +78,8 @@ Modules are referenced by string name in `modules-left/center/right`.
 - `tray` is implemented (icons-only, best-effort).
 - `hyprland-workspaces` is implemented.
 - `hyprland-taskbar` is implemented (basic; focus/close actions are best-effort).
-- `button-*` currently becomes a placeholder `gtk::Button`.
+- `button-omarchy` is implemented.
+- Other `button-*` modules currently become a placeholder `gtk::Button`.
 - Everything else becomes a placeholder `gtk::Label` with its widget name set.
 
 Controls:
@@ -86,6 +87,7 @@ Controls:
 - Upstream config uses `controls: "left|right|off"` and `controls-settings: { ... }`.
 - If `controls` is `left`/`right`, we create the controls widget and place it in that box.
 - If `controls` appears in `modules-*`, we still enable it, but avoid duplicating it.
+- The current controls implementation is minimal (icons-only); popup UI parity is planned later.
 
 ## Implemented: layer-shell window setup
 
