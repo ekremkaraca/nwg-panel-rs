@@ -1,0 +1,22 @@
+pkgbase = nwg-panel-rs-bin
+	pkgdesc = Rewrite of nwg-panel in Rust with GTK4 (prebuilt binary)
+	pkgver = 0.0.3
+	pkgrel = 1
+	url = https://github.com/ekremkaraca/nwg-panel-rs
+	arch = x86_64
+	license = MIT
+	depends = gtk4
+	depends = gtk4-layer-shell
+	depends = dbus
+	depends = hyprland
+	optdepends = brightnessctl: brightness slider backend (recommended)
+	optdepends = light: brightness slider backend (alternative)
+	optdepends = pamixer: volume slider backend (recommended)
+	optdepends = pulseaudio-utils: provides pactl volume fallback
+	optdepends = upower: battery info backend
+	provides = nwg-panel-rs
+	conflicts = nwg-panel-rs
+	source = nwg-panel-rs-bin-0.0.3.tar.gz::https://github.com/ekremkaraca/nwg-panel-rs/releases/download/v0.0.3/nwg-panel-rs-0.0.3-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums = c482c1d07effc2fa13186bb1712b1efacc15ba20fd1bbcc2baaf69854adcbe95
+
+pkgname = nwg-panel-rs-bin

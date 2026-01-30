@@ -25,12 +25,11 @@ optdepends=(
 
 provides=('nwg-panel-rs')
 conflicts=('nwg-panel-rs')
-install="nwg-panel-rs-bin.install"
 
 _target="x86_64-unknown-linux-gnu"
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/nwg-panel-rs-$pkgver-$_target.tar.gz")
 
-sha256sums=('SKIP')
+sha256sums=('c482c1d07effc2fa13186bb1712b1efacc15ba20fd1bbcc2baaf69854adcbe95')
 
 package() {
   install -Dm755 "nwg-panel-rs" "$pkgdir/usr/bin/nwg-panel-rs"
